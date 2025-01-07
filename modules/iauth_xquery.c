@@ -76,6 +76,7 @@
  *  dronecheck - CHECK <nickname> <username> <ip-addr> <hostname> <realname>
  *  combined - CHECK <nickname> <username> <ip-addr> <hostname> <realname>,
  *   then LOGIN <accountname password>
+ *  verify - VERIFY <nickname> [username]
  *
  * Account stamps are ignored for "dronecheck" services' OK messages.
  *
@@ -134,7 +135,8 @@ enum iauth_xquery_type {
     LOGIN,
     LOGIN_IPR,
     DRONECHECK,
-    COMBINED
+    COMBINED,
+    VERIFY
 };
 
 /* This MUST be indexed the same as the #iauth_xquery_type enum. */
@@ -142,7 +144,8 @@ static const char *type_names[] = {
     "login",
     "login-ipr",
     "dronecheck",
-    "combined"
+    "combined",
+    "verify"
 };
 
 struct iauth_xquery_service {
@@ -188,7 +191,7 @@ static struct {
 static struct iauth_module iauth_xquery;
 static struct log_type *iauth_xquery_log;
 static struct iauth_xquery_services iauth_xquery_services;
-static struct iauth_flagset iauth_xquery_flags[4];
+static struct iauth_flagset iauth_xquery_flags[5];
 
 static struct {
     unsigned long n_cli_allocs;
@@ -270,6 +273,9 @@ static void iauth_xquery_set_account(struct iauth_request *req,
         req->account[ii] = '\0';
 }
 
+static void iauth_xquery_check(struct iauth_request *req,
+                               UNUSED_ARG(enum iauth_flags flag));
+
 static void iauth_xquery_x_reply(const char service[], const char routing[],
                                  const char reply[])
 {
@@ -302,7 +308,7 @@ static void iauth_xquery_x_reply(const char service[], const char routing[],
     /* Handle the response. */
     if (!reply) {
         srv->unlinked++;
-        if (srv->type != DRONECHECK)
+        if (srv->type != DRONECHECK && srv->type != VERIFY)
             iauth_challenge(req, "The login server is currently disconnected.  Please excuse the inconvenience.");
     } else if (reply[0] == 'O' && reply[1] == 'K'
                && (reply[2] == '\0' || reply[2] == ' ')) {
@@ -326,6 +332,7 @@ static void iauth_xquery_x_reply(const char service[], const char routing[],
              * on NO responses).
              */
             srv->good_acct++;
+            iauth_xquery_check(req, IAUTH_GOT_ACCOUNT);
         } else {
             log_message(iauth_xquery_log, LOG_WARNING,
                         "Ignoring OK <account> from non-login service %s",
@@ -404,8 +411,14 @@ static void iauth_xquery_check(struct iauth_request *req,
 
         if ((cli->sent_mask & (1u << ii))
             && ((flag != IAUTH_GOT_PASSWORD)
-                || (srv->type == DRONECHECK)))
+                || (srv->type == DRONECHECK)
+                || (srv->type == VERIFY)))
             continue; /* already asked this server */
+
+        if (srv->type == VERIFY
+            && cli->password[0] != '\0'
+            && req->account[0] == '\0')
+            continue; /* don't ask if password and no login response. */
 
         if ((srv->type == LOGIN || srv->type == LOGIN_IPR)
             && !cli->password[0])
@@ -437,6 +450,12 @@ static void iauth_xquery_check(struct iauth_request *req,
                           "CHECK %s %s %s %s :%s",
                           req->nickname, username, req->text_addr,
                           hostname, req->realname);
+
+        if (srv->type == VERIFY)
+            iauth_x_query(srv->name, routing, "VERIFY %s %s %s %s %s :%s",
+                          req->nickname, username, req->text_addr,
+                          hostname, req->account[0] == '\0' ? "":
+                          req->account, req->realname);
 
         if (!cli->password[0]) {
             /* do not send a login-type line */
@@ -682,6 +701,11 @@ void module_constructor(UNUSED_ARG(const char name[]))
                      IAUTH_GOT_IDENT,
                      IAUTH_GOT_PASSWORD);
     BITSET_MULTI_SET(iauth_xquery_flags[DRONECHECK],
+                     IAUTH_GOT_HOSTNAME,
+                     IAUTH_GOT_IDENT,
+                     IAUTH_GOT_NICK,
+                     IAUTH_GOT_USER_INFO);
+    BITSET_MULTI_SET(iauth_xquery_flags[VERIFY],
                      IAUTH_GOT_HOSTNAME,
                      IAUTH_GOT_IDENT,
                      IAUTH_GOT_NICK,

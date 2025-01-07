@@ -123,6 +123,8 @@ enum iauth_flags {
     IAUTH_GOT_PASSWORD,
     /** Set when we get a 'H' message. */
     IAUTH_GOT_HURRY_UP,
+    /** Set when we get the account. */
+    IAUTH_GOT_ACCOUNT,
     /** Set when we get blank 'u' message, but have not gotten 'U'. */
     IAUTH_EMPTY_IDENT,
     /** Sentinel/count value for IAuth flags. */
